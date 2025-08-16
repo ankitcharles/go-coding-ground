@@ -1,0 +1,20 @@
+# Compiled binaries
+/api
+/restapi-go
+
+# IDE-specific files
+.idea/
+
+# Environment files
+.env
+
+# Certificates and private keys
+*.pem
+*.key
+
+# Go build cache
+*.test
+*.out
+
+# Dependency directories (if you use `go mod vendor`)
+vendor/
