@@ -6,9 +6,20 @@ import (
 	"net/http"
 	mw "restapi-go/internal/api/middlewares"
 	"restapi-go/internal/api/routers"
+	"restapi-go/internal/repository/sqlconnect"
+
+	_ "github.com/go-sql-driver/mysql"
 )
 
 func main() {
+
+	db, err := sqlconnect.ConnectDb("test_database")
+	if err != nil {
+		fmt.Println("Error connecting to database", err)
+		return
+	}
+	defer db.Close()
+
 	port := ":3002"
 	cert := "cert.pem"
 	key := "key.pem"
@@ -30,7 +41,7 @@ func main() {
 		TLSConfig: tlsConfig,
 	}
 	// Start the server with TLS
-	err := server.ListenAndServeTLS(cert, key)
+	err = server.ListenAndServeTLS(cert, key)
 	if err != nil {
 		fmt.Println("Error starting server", err)
 	}
