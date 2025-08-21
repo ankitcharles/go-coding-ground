@@ -79,19 +79,12 @@ func getTeacherHandler(w http.ResponseWriter, r *http.Request) {
 	fmt.Println("ID:", id)
 
 	if id == "" {
-		firstName := r.URL.Query().Get("first_name")
-		lastName := r.URL.Query().Get("last_name")
 
 		query := "SELECT id, first_name, last_name, email, class, subject FROM teachers where 1=1"
 		var args []interface{}
-		if firstName != "" {
-			query += " AND first_name = ?"
-			args = append(args, firstName)
-		}
-		if lastName != "" {
-			query += " AND last_name = ?"
-			args = append(args, lastName)
-		}
+
+		query, args = addFilter(r, query, args)
+
 		rows, err := db.Query(query, args...)
 		if err != nil { // Handle the error
 			http.Error(w, "Database query error", http.StatusInternalServerError)
@@ -157,36 +150,25 @@ func getTeacherHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(teacher)
 }
-func addTeacherHandler(w http.ResponseWriter, r *http.Request) {
-	// mutex.Lock()
-	// defer mutex.Unlock()
 
-	// var newTeachers []models.Teacher
-	// err := json.NewDecoder(r.Body).Decode(&newTeachers)
-	// if err != nil {
-	// 	http.Error(w, "Invalid request body", http.StatusBadRequest)
-	// 	return
-	// }
-	// addedTeachers := make([]models.Teacher, 0, len(newTeachers))
-	// for _, newTeacher := range newTeachers {
-	// 	newTeacher.ID = nextId
-	// 	teachers[nextId] = newTeacher
-	// 	addedTeachers = append(addedTeachers, newTeacher)
-	// 	nextId++
-	// }
-	// w.Header().Set("Content-Type", "application/json")
-	// w.WriteHeader(http.StatusCreated)
-	// response := struct {
-	// 	Status string           `json:"status"`
-	// 	Count  int              `json:"count"`
-	// 	Data   []models.Teacher `json:"data"`
-	// }{
-	// 	Status: "success",
-	// 	Count:  len(addedTeachers),
-	// 	Data:   addedTeachers,
-	// }
-	// json.NewEncoder(w).Encode(response)
-	// fmt.Println("Added new teachers:", addedTeachers)
+func addFilter(r *http.Request, query string, args []interface{}) (string, []interface{}) {
+	params := map[string]string{
+		"first_name": "first_name",
+		"last_name":  "last_name",
+		"email":      "email",
+		"class":      "class",
+		"subject":    "subject",
+	}
+	for param, dbField := range params {
+		value := r.URL.Query().Get(param)
+		if value != "" {
+			query += " AND " + dbField + " = ?"
+			args = append(args, value)
+		}
+	}
+	return query, args
+}
+func addTeacherHandler(w http.ResponseWriter, r *http.Request) {
 	dbName := "school"
 	db, err := sqlconnect.ConnectDb(dbName)
 	if err != nil {
