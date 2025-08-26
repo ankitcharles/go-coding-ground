@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"reflect"
 	"restapi-go/internal/models"
@@ -41,7 +42,6 @@ func GetTeacherHandler(w http.ResponseWriter, r *http.Request) {
 	fmt.Println("ID:", id)
 
 	if id == "" {
-
 		query := "SELECT id, first_name, last_name, email, class, subject FROM teachers where 1=1"
 		var args []interface{}
 
@@ -204,8 +204,7 @@ func AddTeacherHandler(w http.ResponseWriter, r *http.Request) {
 
 // PUT /teachers/{id}
 func UpdateTeacherHandler(w http.ResponseWriter, r *http.Request) {
-
-	idStr := strings.TrimPrefix(r.URL.Path, "/teachers/")
+	idStr := r.PathValue("id")
 	id, err := strconv.Atoi(idStr)
 	if err != nil {
 		http.Error(w, "Invalid teacher ID", http.StatusBadRequest)
@@ -250,8 +249,8 @@ func UpdateTeacherHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // PATCH /teachers/{id}
-func PatchTeacherHandler(w http.ResponseWriter, r *http.Request) {
-	idStr := strings.TrimPrefix(r.URL.Path, "/teachers/")
+func PatchSingleTeacherHandler(w http.ResponseWriter, r *http.Request) {
+	idStr := r.PathValue("id")
 	id, err := strconv.Atoi(idStr)
 	if err != nil {
 		http.Error(w, "Invalid teacher ID", http.StatusBadRequest)
@@ -284,21 +283,6 @@ func PatchTeacherHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	// Build the update query dynamically based on provided fields
-	// for k, v := range updates {
-	// 	switch k {
-	// 	case "first_name":
-	// 		existingTeacher.FirstName = v.(string)
-	// 	case "last_name":
-	// 		existingTeacher.LastName = v.(string)
-	// 	case "email":
-	// 		existingTeacher.Email = v.(string)
-	// 	case "class":
-	// 		existingTeacher.Class = v.(string)
-	// 	case "subject":
-	// 		existingTeacher.Subject = v.(string)
-	// 	}
-	// }
 
 	// Use reflect to build the update query dynamically
 	teacherVal := reflect.ValueOf(&existingTeacher).Elem()
@@ -333,9 +317,99 @@ func PatchTeacherHandler(w http.ResponseWriter, r *http.Request) {
 	fmt.Println("Updated teacher:", existingTeacher)
 }
 
+// patch /teachers
+func PatchMultipleTeachersHandler(w http.ResponseWriter, r *http.Request) {
+	dbName := "school"
+	db, err := sqlconnect.ConnectDb(dbName)
+	if err != nil {
+		http.Error(w, "Database connection error", http.StatusInternalServerError)
+		return
+	}
+	defer db.Close()
+
+	var updates []map[string]interface{}
+	err = json.NewDecoder(r.Body).Decode(&updates)
+	if err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		log.Println("Error starting transaction:", err)
+		http.Error(w, "Database transaction error", http.StatusInternalServerError)
+		return
+	}
+	for _, update := range updates {
+		idStr, ok := update["id"].(string)
+		if !ok {
+			tx.Rollback()
+			http.Error(w, "Invalid teacher ID", http.StatusBadRequest)
+			return
+		}
+		id, err := strconv.Atoi(idStr)
+		if err != nil {
+			tx.Rollback()
+			http.Error(w, "Invalid teacher ID", http.StatusBadRequest)
+		}
+
+		var teacherFromDB models.Teacher
+		err = db.QueryRow("SELECT id, first_name, last_name, email, class,subject FROM teachers WHERE id = ?", id).Scan(&teacherFromDB.ID, &teacherFromDB.FirstName, &teacherFromDB.LastName, &teacherFromDB.Email, &teacherFromDB.Class, &teacherFromDB.Subject)
+		if err != nil {
+			if err == sql.ErrNoRows {
+				tx.Rollback()
+				http.Error(w, "Teacher not found", http.StatusNotFound)
+			} else {
+				tx.Rollback()
+				http.Error(w, "Database query error", http.StatusInternalServerError)
+			}
+		}
+		//Apply updates using reflection in DB
+		teacherVal := reflect.ValueOf(&teacherFromDB).Elem()
+		teacherType := teacherVal.Type()
+		for k, v := range update {
+			if k == "id" {
+				continue // skip the eky
+			}
+			for i := 0; i < teacherVal.NumField(); i++ {
+				field := teacherType.Field(i)
+				if field.Tag.Get("json") == k+" ,omitempty" {
+					fieldVal := teacherVal.Field(i)
+					if fieldVal.CanSet() {
+						val := reflect.ValueOf(v)
+						if val.Type().ConvertibleTo(fieldVal.Type()) {
+							fieldVal.Set(val.Convert(fieldVal.Type()))
+						} else {
+							tx.Rollback()
+							http.Error(w, "Invalid value type", http.StatusBadRequest)
+							return
+						}
+					}
+					break
+				}
+			}
+		}
+		_, err = tx.Exec("UPDATE teachers SET first_name = ?, last_name = ?, email = ?, class = ?, subject = ? WHERE id = ?", teacherFromDB.FirstName, teacherFromDB.LastName, teacherFromDB.Email, teacherFromDB.Class, teacherFromDB.Subject, id)
+		if err != nil {
+			tx.Rollback()
+			http.Error(w, "Database update error while updating teacher", http.StatusInternalServerError)
+			return
+		}
+	}
+
+	err = tx.Commit()
+	if err != nil {
+		log.Println("Error committing transaction:", err)
+		http.Error(w, "Database transaction error", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusNoContent)
+	fmt.Println("Updated teachers:", updates)
+}
+
 // DELETE /teachers/{id}
 func DeleteTeacherHandler(w http.ResponseWriter, r *http.Request) {
-	idStr := strings.TrimPrefix(r.URL.Path, "/teachers/")
+	idStr := r.PathValue("id")
 	id, err := strconv.Atoi(idStr)
 	if err != nil {
 		http.Error(w, "Invalid teacher ID", http.StatusBadRequest)
@@ -366,6 +440,7 @@ func DeleteTeacherHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	//w.WriteHeader(http.StatusNoContent)
 	fmt.Println("Deleted teacher with ID:", id)
+
 	// Optionally, you can return a response body indicating successful deletion
 	w.Header().Set("Content-Type", "application/json")
 	response := struct {
